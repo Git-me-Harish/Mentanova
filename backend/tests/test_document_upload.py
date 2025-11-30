@@ -13,8 +13,8 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 import httpx
 from loguru import logger
+from backend.app.core.config import settings
 
-from app.core.config import settings
 
 
 async def test_document_upload():

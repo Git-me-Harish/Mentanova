@@ -3,7 +3,7 @@ Core configuration module using Pydantic settings management.
 Loads environment variables and provides type-safe configuration access.
 """
 from typing import List, Optional
-from pydantic import Field, validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 
@@ -44,7 +44,10 @@ class Settings(BaseSettings):
     @property
     def sync_database_url(self) -> str:
         """Synchronous database URL for SQLAlchemy operations."""
-        return f"postgresql://{self.postgres_user}:{self.postgres_password}@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+        return (
+            f"postgresql://{self.postgres_user}:{self.postgres_password}"
+            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+        )
     
     # Redis Configuration
     redis_url: str = "redis://localhost:6379/0"
@@ -119,37 +122,27 @@ class Settings(BaseSettings):
     rate_limit_requests: int = 100
     rate_limit_window: int = 60
     
-    @validator("cors_origins", pre=True)
+    @field_validator("cors_origins", mode="before")
     def parse_cors_origins(cls, v):
         """Parse CORS origins from string or list."""
         if isinstance(v, str):
             return [origin.strip() for origin in v.split(",")]
         return v
     
-    @validator("openai_api_key", "cohere_api_key", "secret_key")
+    @field_validator("openai_api_key", "cohere_api_key", "secret_key")
     def validate_secrets(cls, v, field):
         """Ensure critical secrets are not using placeholder values."""
         if not v or "your-" in v.lower() or "change-this" in v.lower():
             raise ValueError(f"{field.name} must be set to a valid value")
         return v
-    
-    class Config:
-        """Pydantic config."""
-        case_sensitive = False
 
 
 @lru_cache()
 def get_settings() -> Settings:
-    """
-    Cached settings singleton.
-    Use this function to access settings throughout the application.
-    """
+    """Cached settings singleton."""
     return Settings()
 
 
-# Global settings instance
 settings = get_settings()
 
-
-# Convenience exports
 __all__ = ["settings", "get_settings", "Settings"]
