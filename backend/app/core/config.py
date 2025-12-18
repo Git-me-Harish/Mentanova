@@ -100,7 +100,7 @@ class Settings(BaseSettings):
     # Generation Configuration
     max_context_tokens: int = 12000
     temperature: float = 0.1
-    max_response_tokens: int = 1000
+    max_response_tokens: int = 2000
     
     # Guardrails Configuration
     enable_input_guardrails: bool = True

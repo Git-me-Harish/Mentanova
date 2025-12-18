@@ -79,27 +79,16 @@ async def chat(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """
-    Chat with the AI assistant using RAG.
-    
-    This endpoint:
-    1. Validates input with guardrails
-    2. Retrieves relevant context from documents
-    3. Generates answer using Gemini
-    4. Validates output for accuracy
-    5. Returns answer with sources
-    """
+    """Chat with the AI assistant using RAG."""
     user_id = str(current_user.id)
     logger.info(f"Chat request from user {user_id}: '{request.query[:50]}...'")
     
-    # Check for streaming
     if request.stream:
         return StreamingResponse(
             _stream_chat(request, db, user_id),
             media_type="text/event-stream"
         )
     
-    # Regular (non-streaming) chat
     try:
         result = await chat_service.chat(
             query=request.query,
@@ -111,7 +100,6 @@ async def chat(
             stream=False
         )
         
-        # Check for errors
         if result.get('error'):
             logger.error(f"Chat service returned error: {result['error']}")
             raise HTTPException(
@@ -119,7 +107,6 @@ async def chat(
                 detail=result['error']
             )
         
-        # Format response - handle missing or empty sources
         sources = []
         for src in result.get('sources', []):
             try:
@@ -400,56 +387,6 @@ def _calculate_duration(conversation: Dict[str, Any]) -> float:
     return round(duration, 1)
 
 
-@router.get("/chat/conversations/{conversation_id}/export")
-async def export_conversation(
-    conversation_id: str,
-    format: str = Query("markdown", regex="^(markdown|json|pdf)$"),
-    current_user: User = Depends(get_current_user)
-):
-    """Export conversation in various formats."""
-    user_id = str(current_user.id)
-    
-    try:
-        conversation = await chat_service.get_conversation_history(
-            conversation_id=conversation_id,
-            user_id=user_id
-        )
-        
-        if 'error' in conversation:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=conversation['error']
-            )
-        
-        if format == "json":
-            return conversation
-        
-        elif format == "markdown":
-            markdown = _export_to_markdown(conversation)
-            return Response(
-                content=markdown,
-                media_type="text/markdown",
-                headers={
-                    "Content-Disposition": f"attachment; filename=conversation_{conversation_id}.md"
-                }
-            )
-        
-        elif format == "pdf":
-            raise HTTPException(
-                status_code=status.HTTP_501_NOT_IMPLEMENTED,
-                detail="PDF export coming soon"
-            )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error exporting conversation: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
-
-
 def _export_to_markdown(conversation: Dict[str, Any]) -> str:
     """Convert conversation to markdown format."""
     lines = [
@@ -488,6 +425,79 @@ def _export_to_markdown(conversation: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+@router.get("/chat/conversations/{conversation_id}/export")
+async def export_conversation(
+    conversation_id: str,
+    format: str = Query("markdown", regex="^(markdown|json|pdf)$"),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Export conversation in various formats.
+    
+    Formats:
+    - markdown: Formatted markdown with sources
+    - json: Complete JSON with metadata
+    - pdf: Professional PDF report
+    """
+    user_id = str(current_user.id)
+    
+    try:
+        conversation = await chat_service.get_conversation_history(
+            conversation_id=conversation_id,
+            user_id=user_id
+        )
+        
+        if 'error' in conversation:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=conversation['error']
+            )
+        
+        if format == "json":
+            return conversation
+        
+        elif format == "markdown":
+            markdown = _export_to_markdown(conversation)
+            return Response(
+                content=markdown,
+                media_type="text/markdown",
+                headers={
+                    "Content-Disposition": f"attachment; filename=conversation_{conversation_id[:8]}.md"
+                }
+            )
+        
+        elif format == "pdf":
+            try:
+                # Import PDF generator
+                from app.services.export.pdf_generator import pdf_generator
+                
+                # Generate PDF
+                pdf_buffer = pdf_generator.generate_conversation_pdf(conversation)
+                
+                return Response(
+                    content=pdf_buffer.read(),
+                    media_type="application/pdf",
+                    headers={
+                        "Content-Disposition": f"attachment; filename=conversation_{conversation_id[:8]}.pdf"
+                    }
+                )
+            except Exception as e:
+                logger.error(f"PDF generation failed: {str(e)}", exc_info=True)
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"PDF generation failed: {str(e)}"
+                )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error exporting conversation: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
 # ====== DEBUG ENDPOINTS ======
 
 @router.get("/chat/debug/database")
@@ -496,7 +506,6 @@ async def debug_database(
     current_user: User = Depends(get_current_user)
 ):
     """Debug endpoint: Check database contents."""
-    # Count documents by status
     doc_query = select(
         Document.status,
         func.count(Document.id).label('count')
@@ -505,18 +514,15 @@ async def debug_database(
     doc_result = await db.execute(doc_query)
     doc_counts = {row.status: row.count for row in doc_result.all()}
     
-    # Count total chunks
     chunk_query = select(func.count(ChunkModel.id))
     chunk_result = await db.execute(chunk_query)
     total_chunks = chunk_result.scalar()
     
-    # Check if embeddings exist
     embedding_check = await db.execute(
         text("SELECT COUNT(*) FROM chunks WHERE embedding IS NOT NULL")
     )
     chunks_with_embeddings = embedding_check.scalar()
     
-    # Get sample documents
     sample_query = select(
         Document.filename,
         Document.status,
@@ -556,24 +562,20 @@ async def debug_chunks(
     current_user: User = Depends(get_current_user)
 ):
     """Debug: Check chunk embeddings in database."""
-    # Total chunks
     total_result = await db.execute(select(func.count(ChunkModel.id)))
     total_chunks = total_result.scalar()
     
-    # Chunks with embeddings
     embedding_result = await db.execute(
         text("SELECT COUNT(*) FROM chunks WHERE embedding IS NOT NULL")
     )
     chunks_with_embeddings = embedding_result.scalar()
     
-    # Check embedding dimensions
     dimension_result = await db.execute(
         text("SELECT array_length(embedding, 1) as dim FROM chunks LIMIT 1")
     )
     dimension_row = dimension_result.first()
     actual_dimensions = dimension_row[0] if dimension_row else None
     
-    # Sample chunk
     sample_result = await db.execute(
         select(ChunkModel.id, ChunkModel.content, ChunkModel.chunk_type)
         .limit(1)
@@ -625,7 +627,7 @@ async def test_embedding(
             'status': 'error',
             'error': str(e),
             'error_type': type(e).__name__,
-            'using_local_fallback': embedding_service.use_local_fallback if hasattr(embedding_service, 'use_local_fallback') else False
+            'using_local_fallback': getattr(embedding_service, 'use_local_fallback', False)
         }
 
 

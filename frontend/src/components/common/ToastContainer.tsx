@@ -48,13 +48,19 @@ export default function ToastContainer() {
       {toasts.map((t) => (
         <div
           key={t.id}
-          className={`flex items-center gap-3 p-4 rounded-lg border shadow-lg transition-all duration-300 ${getStyles(t.type)}`}
+          className={`
+            flex items-center gap-3 p-4 rounded-lg border shadow-lg 
+            transition-all duration-300
+            animate-slideIn
+            ${getStyles(t.type)}
+          `}
         >
           {getIcon(t.type)}
           <p className="flex-1 text-sm font-medium text-gray-900">{t.message}</p>
           <button
             onClick={() => toast.remove(t.id)}
             className="text-gray-400 hover:text-gray-600 transition-colors"
+            aria-label="Close notification"
           >
             <X className="w-4 h-4" />
           </button>

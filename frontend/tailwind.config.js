@@ -32,8 +32,42 @@ export default {
           900: '#701a75',
         },
       },
+      // ADD THESE ANIMATIONS
+      keyframes: {
+        'pulse-slow': {
+          '0%, 100%': { opacity: '1' },
+          '50%': { opacity: '.5' },
+        },
+        slideIn: {
+          '0%': { 
+            transform: 'translateX(100%)',
+            opacity: '0'
+          },
+          '100%': { 
+            transform: 'translateX(0)',
+            opacity: '1'
+          },
+        },
+        slideOut: {
+          '0%': { 
+            transform: 'translateX(0)',
+            opacity: '1'
+          },
+          '100%': { 
+            transform: 'translateX(100%)',
+            opacity: '0'
+          },
+        },
+        fadeIn: {
+          '0%': { opacity: '0' },
+          '100%': { opacity: '1' },
+        },
+      },
       animation: {
-        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+        'pulse-slow': 'pulse-slow 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+        'slideIn': 'slideIn 0.3s ease-out',
+        'slideOut': 'slideOut 0.3s ease-out',
+        'fadeIn': 'fadeIn 0.3s ease-out',
       },
     },
   },

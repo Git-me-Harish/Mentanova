@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Send, Loader2, FileText, AlertCircle, Plus, Sparkles, BarChart3 } from 'lucide-react';
 import api, { ChatMessage, ChatResponse, Source } from '../services/api';
@@ -7,6 +7,10 @@ import SourceCard from '../components/chat/SourceCard';
 import ContextIndicator from '../components/chat/ContextIndicator';
 import ExportButton from '../components/chat/ExportButton';
 import AnalyticsModal from '../components/chat/AnalyticsModal';
+
+// Memoize MessageBubble for better performance
+const MemoizedMessageBubble = memo(MessageBubble);
+const MemoizedSourceCard = memo(SourceCard);
 
 export default function ChatPage() {
   const { conversationId } = useParams();
@@ -48,7 +52,6 @@ export default function ChatPage() {
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
-      // Ctrl/Cmd + A to open analytics
       if ((e.ctrlKey || e.metaKey) && e.key === 'a' && currentConversationId) {
         e.preventDefault();
         setShowAnalytics(true);
@@ -69,6 +72,30 @@ export default function ChatPage() {
       setError('Failed to load conversation');
     }
   };
+
+  // OPTIMIZED: Handle chat response with useCallback
+  const handleChatResponse = useCallback((response: ChatResponse) => {
+    // Format sources
+    const formattedSources = response.sources.map(src => ({
+      ...src
+    }));
+    
+    setSources(formattedSources);
+    
+    // Set suggestions with a small delay to prevent blocking
+    setTimeout(() => {
+      if (response.suggestions && Array.isArray(response.suggestions)) {
+        setSuggestions(response.suggestions);
+      } else {
+        setSuggestions([]);
+      }
+    }, 0);
+    
+    // Update context
+    if (response.metadata?.context_summary) {
+      setContextSummary(response.metadata.context_summary);
+    }
+  }, []);
 
   const handleSendMessage = async () => {
     if (!input.trim() || loading) return;
@@ -111,25 +138,9 @@ export default function ChatPage() {
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
-      setSources(response.sources);
       
-      // Debug: Log the response
-      console.log('📊 Full API Response:', response);
-      console.log('💡 Suggestions received:', response.suggestions);
-      
-      // Update context summary
-      if (response.metadata?.context_summary) {
-        setContextSummary(response.metadata.context_summary);
-      }
-      
-      // Update suggestions (with fallback for undefined)
-      if (response.suggestions && Array.isArray(response.suggestions)) {
-        console.log('✅ Setting suggestions:', response.suggestions);
-        setSuggestions(response.suggestions);
-      } else {
-        console.log('⚠️ No suggestions in response');
-        setSuggestions([]);
-      }
+      // Use optimized handler
+      handleChatResponse(response);
       
       setError(null);
 
@@ -137,7 +148,6 @@ export default function ChatPage() {
       console.error('Chat error:', err);
       const errorMessage = err.response?.data?.detail || 'Failed to send message. Please try again.';
       
-      // Show error as assistant message
       const errorAssistantMessage: ChatMessage = {
         role: 'assistant',
         content: `I apologize, but I encountered an error: ${errorMessage}\n\nPlease try rephrasing your question or try again in a moment.`,
@@ -148,7 +158,6 @@ export default function ChatPage() {
       setMessages((prev) => [...prev, errorAssistantMessage]);
     } finally {
       setLoading(false);
-      // Focus back to input
       inputRef.current?.focus();
     }
   };
@@ -160,7 +169,7 @@ export default function ChatPage() {
     }
   };
 
-  const startNewChat = () => {
+  const startNewChat = useCallback(() => {
     setMessages([]);
     setCurrentConversationId(null);
     setSources([]);
@@ -169,23 +178,24 @@ export default function ChatPage() {
     setSuggestions([]);
     navigate('/chat');
     inputRef.current?.focus();
-  };
+  }, [navigate]);
 
-  const clearContext = () => {
+  const clearContext = useCallback(() => {
     setContextSummary(null);
     setSuggestions([]);
-  };
+  }, []);
 
-  const handleSuggestionClick = (suggestion: string) => {
+  const handleSuggestionClick = useCallback((suggestion: string) => {
     setInput(suggestion);
-  };
+    setSuggestions([]);
+  }, []);
 
-  const exampleQuestions = [
+  const exampleQuestions = useMemo(() => [
     'What is this document about?',
     'Explain the leave policy',
     'Show me expense reimbursement details',
     'What was the Q4 revenue?',
-  ];
+  ], []);
 
   return (
     <div className="flex h-full bg-gray-50">
@@ -207,7 +217,6 @@ export default function ChatPage() {
           
           {messages.length > 0 && (
             <div className="flex items-center gap-2">
-              {/* Analytics Button */}
               {currentConversationId && (
                 <button
                   onClick={() => setShowAnalytics(true)}
@@ -219,12 +228,10 @@ export default function ChatPage() {
                 </button>
               )}
               
-              {/* Export Button */}
               {currentConversationId && (
                 <ExportButton conversationId={currentConversationId} />
               )}
               
-              {/* New Chat Button */}
               <button
                 onClick={startNewChat}
                 className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
@@ -238,7 +245,6 @@ export default function ChatPage() {
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto">
-          {/* Context Indicator */}
           {messages.length > 0 && contextSummary && (
             <div className="sticky top-0 z-10 pt-4 bg-gray-50">
               <ContextIndicator 
@@ -247,8 +253,7 @@ export default function ChatPage() {
               />
             </div>
           )}
-          
-          <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
+          <div className="max-w-6xl mx-auto px-8 py-8 space-y-6">
             {messages.length === 0 && (
               <div className="h-full flex items-center justify-center py-12">
                 <div className="text-center max-w-2xl">
@@ -282,7 +287,7 @@ export default function ChatPage() {
             )}
 
             {messages.map((message, index) => (
-              <MessageBubble key={index} message={message} />
+              <MemoizedMessageBubble key={`${message.timestamp}-${index}`} message={message} />
             ))}
 
             {loading && (
@@ -319,8 +324,7 @@ export default function ChatPage() {
 
         {/* Input */}
         <div className="border-t border-gray-200 bg-white p-4 shadow-lg">
-          <div className="max-w-4xl mx-auto">
-            {/* Suggestions */}
+          <div className="max-w-6xl mx-auto">
             {suggestions.length > 0 && messages.length > 0 && (
               <div className="mb-3 animate-fadeIn">
                 <div className="flex items-center justify-between mb-2">
@@ -352,7 +356,6 @@ export default function ChatPage() {
               </div>
             )}
 
-            {/* Context hint */}
             {contextSummary && contextSummary.primary_document && (
               <div className="mb-2 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-md">
                 <p className="text-xs text-blue-700">
@@ -411,7 +414,7 @@ export default function ChatPage() {
           </div>
           <div className="p-4 space-y-2">
             {sources.map((source, index) => (
-              <SourceCard key={index} source={source} />
+              <MemoizedSourceCard key={`${source.chunk_id}-${index}`} source={source} />
             ))}
           </div>
         </div>
