@@ -42,4 +42,4 @@ ENV PYTHONPATH=/app/backend
 EXPOSE 8000
 
 # ✅ RUN MIGRATIONS FIRST, THEN START SERVER
-CMD ["sh", "-c", "alembic -c backend/alembic.ini upgrade head && uvicorn backend.app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "alembic -c backend/alembic.ini stamp head && alembic -c backend/alembic.ini upgrade head && uvicorn backend.app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
