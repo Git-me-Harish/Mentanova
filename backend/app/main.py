@@ -15,7 +15,7 @@ from app.db.session import init_db, close_db
 from app.api.endpoints import health, documents, auth, chat, search, admin, document_editor, customization
 from pathlib import Path
 from fastapi.staticfiles import StaticFiles
-
+from fastapi.responses import FileResponse
 
 # Configure Loguru logger
 logger.remove()
@@ -187,11 +187,14 @@ app.include_router(
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 if STATIC_DIR.exists():
-    app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="frontend")
+    app.mount(
+        "/", 
+        StaticFiles(directory=str(STATIC_DIR), html=True), 
+        name="frontend"
+    )
     logger.info(f"✅ Frontend mounted from {STATIC_DIR}")
 else:
-    logger.warning(f"⚠️ Frontend static directory not found at {STATIC_DIR}")
-
+    logger.warning(f"⚠️ Static directory not found: {STATIC_DIR}")
 
 
 
