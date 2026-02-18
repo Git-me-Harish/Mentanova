@@ -185,30 +185,18 @@ app.include_router(
 
 from fastapi.responses import FileResponse
 
-static_path = Path("static")
+STATIC_DIR = Path("/app/backend/static")  # adjust if needed
 
-if static_path.exists():
-    app.mount("/static", StaticFiles(directory="static"), name="static")
-
-    @app.get("/")
-    async def serve_frontend():
-        return FileResponse("static/index.html")
-
-    @app.get("/{full_path:path}")
-    async def serve_spa(full_path: str):
-        return FileResponse("static/index.html")
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 @app.get("/")
-async def root():
-    """Root endpoint - API information."""
-    return {
-        "name": settings.app_name,
-        "version": settings.app_version,
-        "status": "operational",
-        "docs": "/api/docs" if settings.debug else "disabled in production",
-        "cors_enabled": True,
-        "allowed_origins": settings.cors_origins_list if settings.debug else "configured"
-    }
+async def serve_frontend():
+    return FileResponse(str(STATIC_DIR / "index.html"))
+
+@app.get("/{full_path:path}")
+async def serve_spa(full_path: str):
+    return FileResponse(str(STATIC_DIR / "index.html"))
+
 
 
 # Add OPTIONS handler for preflight requests
