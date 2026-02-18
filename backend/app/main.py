@@ -183,6 +183,20 @@ app.include_router(
     tags=["Document Editor"]
 )
 
+from fastapi.responses import FileResponse
+
+static_path = Path("static")
+
+if static_path.exists():
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+
+    @app.get("/")
+    async def serve_frontend():
+        return FileResponse("static/index.html")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        return FileResponse("static/index.html")
 
 @app.get("/")
 async def root():
