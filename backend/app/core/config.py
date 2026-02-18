@@ -34,20 +34,7 @@ class Settings(BaseSettings):
     database_url: str = Field(..., description="Async PostgreSQL connection URL")
     database_pool_size: int = 20
     database_max_overflow: int = 10
-    
-    postgres_user: str
-    postgres_password: str
-    postgres_db: str
-    postgres_host: str = "localhost"
-    postgres_port: int = 5432
-    
-    @property
-    def sync_database_url(self) -> str:
-        """Synchronous database URL for SQLAlchemy operations."""
-        return (
-            f"postgresql://{self.postgres_user}:{self.postgres_password}"
-            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
-        )
+  
     
     # Redis Configuration
     redis_url: str = "redis://localhost:6379/0"
