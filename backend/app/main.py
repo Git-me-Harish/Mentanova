@@ -13,6 +13,8 @@ from app.api.endpoints import organization
 from app.core.config import settings
 from app.db.session import init_db, close_db
 from app.api.endpoints import health, documents, auth, chat, search, admin, document_editor, customization
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles
 
 
 # Configure Loguru logger
@@ -181,8 +183,6 @@ app.include_router(
     tags=["Document Editor"]
 )
 
-from pathlib import Path
-from fastapi.staticfiles import StaticFiles
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
