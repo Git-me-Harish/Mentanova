@@ -6,11 +6,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from loguru import logger
 import sys
-from pathlib import Path
 from app.api.endpoints import organization
 from app.core.config import settings
 from app.db.session import init_db, close_db
@@ -183,24 +181,18 @@ app.include_router(
     tags=["Document Editor"]
 )
 
-from fastapi.responses import FileResponse
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles
 
-STATIC_DIR = Path("/app/backend/static")
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+if STATIC_DIR.exists():
+    app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="frontend")
+    logger.info(f"✅ Frontend mounted from {STATIC_DIR}")
+else:
+    logger.warning(f"⚠️ Frontend static directory not found at {STATIC_DIR}")
 
-@app.get("/")
-async def serve_frontend():
-    return FileResponse(str(STATIC_DIR / "index.html"))
 
-
-@app.get("/{full_path:path}")
-async def serve_spa(full_path: str):
-    # Do NOT override API routes
-    if full_path.startswith("api"):
-        return JSONResponse({"error": "Not Found"}, status_code=404)
-
-    return FileResponse(str(STATIC_DIR / "index.html"))
 
 
 
