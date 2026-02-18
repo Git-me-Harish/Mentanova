@@ -185,7 +185,7 @@ app.include_router(
 
 from fastapi.responses import FileResponse
 
-STATIC_DIR = Path("/app/backend/static")  # adjust if needed
+STATIC_DIR = Path("/app/backend/static")
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -193,9 +193,15 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 async def serve_frontend():
     return FileResponse(str(STATIC_DIR / "index.html"))
 
+
 @app.get("/{full_path:path}")
 async def serve_spa(full_path: str):
+    # Do NOT override API routes
+    if full_path.startswith("api"):
+        return JSONResponse({"error": "Not Found"}, status_code=404)
+
     return FileResponse(str(STATIC_DIR / "index.html"))
+
 
 
 
