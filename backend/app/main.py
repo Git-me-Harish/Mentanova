@@ -187,7 +187,7 @@ app.include_router(
 
 
 # Mount the React frontend build
-frontend_path = Path(__file__).parent / "static"
+frontend_path = Path(__file__).parent.parent / "static"
 if frontend_path.exists():
     app.mount("/static", StaticFiles(directory=str(frontend_path)), name="static")
     logger.info(f"✅ Frontend static files mounted at /static -> {frontend_path}")
