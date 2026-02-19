@@ -11,8 +11,8 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: '../backend/static',  // adjust this path to match your folder structure
-    emptyOutDir: true,            // clears old files before each build
+    outDir: 'dist',  // keep this as-is, Docker handles the copying
+    emptyOutDir: true,
     assetsDir: 'assets',
     assetsInlineLimit: 0,
   },
