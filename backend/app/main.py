@@ -7,15 +7,22 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from loguru import logger
 import sys
-from fastapi.responses import FileResponse
 from pathlib import Path
-from app.api.endpoints import organization
+
+from app.api.endpoints import organization, health, documents, auth, chat, search, admin, document_editor, customization
 from app.core.config import settings
 from app.db.session import init_db, close_db
-from app.api.endpoints import health, documents, auth, chat, search, admin, document_editor, customization
+
+
+# ============================================================
+# FRONTEND PATH - Fixed to point to correct location
+# ============================================================
+# main.py is at: /app/backend/app/main.py
+# static files are at: /app/backend/static
+FRONTEND_PATH = Path(__file__).parent.parent / "static"
 
 
 # Configure Loguru logger
@@ -47,6 +54,11 @@ async def lifespan(app: FastAPI):
     logger.info(f"Environment: {settings.environment}")
     logger.info(f"Debug mode: {settings.debug}")
     logger.info(f"CORS Origins: {settings.cors_origins_list}")
+    logger.info(f"Frontend path: {FRONTEND_PATH}")
+    logger.info(f"Frontend exists: {FRONTEND_PATH.exists()}")
+    
+    if FRONTEND_PATH.exists():
+        logger.info(f"Frontend files: {list(FRONTEND_PATH.iterdir())}")
     
     try:
         # Initialize database
@@ -102,7 +114,7 @@ app = FastAPI(
 )
 
 
-# Configure CORS - USING PROPERTY FOR DOCKER COMPATIBILITY
+# Configure CORS
 logger.info(f"🔐 Configuring CORS with origins: {settings.cors_origins_list}")
 
 app.add_middleware(
@@ -121,135 +133,114 @@ logger.info("✅ CORS middleware configured successfully")
 # Add GZip compression
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-# Mount static files for uploads
+
+# ============================================================
+# MOUNT STATIC FILES FIRST (Uploads)
+# ============================================================
 upload_path = Path(settings.upload_dir)
 if upload_path.exists():
     app.mount("/uploads", StaticFiles(directory=str(upload_path)), name="uploads")
     logger.info(f"✅ Static files mounted at /uploads -> {upload_path}")
 
 
-# Include routers
-app.include_router(
-    health.router,
-    prefix=settings.api_v1_prefix,
-    tags=["Health"]
-)
-
-app.include_router(
-    auth.router,
-    prefix=settings.api_v1_prefix,
-    tags=["Authentication"]
-)
-
-app.include_router(
-    documents.router,
-    prefix=settings.api_v1_prefix,
-    tags=["Documents"]
-)
-
-app.include_router(
-    search.router,
-    prefix=settings.api_v1_prefix,
-    tags=["Search"]
-)
-
-app.include_router(
-    chat.router,
-    prefix=settings.api_v1_prefix,
-    tags=["Chat"]
-)
-
-app.include_router(
-    customization.router,
-    prefix=settings.api_v1_prefix,
-    tags=["Customization"]
-)
-
-app.include_router(
-    organization.router,
-    prefix=settings.api_v1_prefix,
-    tags=["Super Admin - Organizations"]
-)
-
-# Admin routes - requires admin role
-app.include_router(
-    admin.router,
-    prefix=settings.api_v1_prefix,
-    tags=["Admin"]
-)
-
-app.include_router(
-    document_editor.router,
-    prefix=settings.api_v1_prefix,
-    tags=["Document Editor"]
-)
+# ============================================================
+# INCLUDE API ROUTERS FIRST
+# ============================================================
+app.include_router(health.router, prefix=settings.api_v1_prefix, tags=["Health"])
+app.include_router(auth.router, prefix=settings.api_v1_prefix, tags=["Authentication"])
+app.include_router(documents.router, prefix=settings.api_v1_prefix, tags=["Documents"])
+app.include_router(search.router, prefix=settings.api_v1_prefix, tags=["Search"])
+app.include_router(chat.router, prefix=settings.api_v1_prefix, tags=["Chat"])
+app.include_router(customization.router, prefix=settings.api_v1_prefix, tags=["Customization"])
+app.include_router(organization.router, prefix=settings.api_v1_prefix, tags=["Super Admin - Organizations"])
+app.include_router(admin.router, prefix=settings.api_v1_prefix, tags=["Admin"])
+app.include_router(document_editor.router, prefix=settings.api_v1_prefix, tags=["Document Editor"])
 
 
+# ============================================================
+# MOUNT FRONTEND STATIC FILES
+# ============================================================
+if FRONTEND_PATH.exists():
+    app.mount("/static", StaticFiles(directory=str(FRONTEND_PATH)), name="static")
+    logger.info(f"✅ Frontend static files mounted at /static -> {FRONTEND_PATH}")
+else:
+    logger.warning(f"⚠️ Frontend static files NOT found at {FRONTEND_PATH}")
 
-# Mount the React frontend build
-frontend_path = Path(__file__).parent.parent / "static"
-if frontend_path.exists():
-    app.mount("/static", StaticFiles(directory=str(frontend_path)), name="static")
-    logger.info(f"✅ Frontend static files mounted at /static -> {frontend_path}")
+
+# ============================================================
+# ROOT ROUTE - Serve index.html
+# ============================================================
+@app.get("/")
+async def serve_index():
+    """Serve the main index.html"""
+    index_file = FRONTEND_PATH / "index.html"
+    if index_file.exists():
+        logger.info(f"Serving index.html from {index_file}")
+        return FileResponse(index_file)
+    logger.error(f"index.html not found at {index_file}")
+    return JSONResponse({"error": "Frontend not built"}, status_code=500)
 
 
+# ============================================================
+# CATCH-ALL ROUTE - Serve SPA for non-API routes
+# Must be LAST to not interfere with other routes
+# ============================================================
 @app.get("/{full_path:path}")
 async def serve_spa(full_path: str):
     """
     Serve React SPA for all non-API paths to enable client-side routing.
-    Excludes API routes that start with your API prefix.
     """
-    if full_path.startswith(settings.api_v1_prefix.strip("/")):
+    api_prefix = settings.api_v1_prefix.strip("/")
+    
+    # Skip API routes
+    if full_path.startswith(api_prefix):
         return JSONResponse({"error": "Not Found"}, status_code=404)
-
-    index_file = frontend_path / "index.html"
+    
+    # Skip static files (handled by mounted StaticFiles, but just in case)
+    if full_path.startswith("static/"):
+        return JSONResponse({"error": "Not Found"}, status_code=404)
+    
+    # Skip uploads
+    if full_path.startswith("uploads/"):
+        return JSONResponse({"error": "Not Found"}, status_code=404)
+    
+    # Serve SPA for everything else (client-side routing)
+    index_file = FRONTEND_PATH / "index.html"
     if index_file.exists():
         return FileResponse(index_file)
-    else:
-        return JSONResponse({"error": "Frontend not built"}, status_code=500)
+    
+    return JSONResponse({"error": "Frontend not built"}, status_code=500)
 
 
-
-# Global exception handler - FIXED
+# ============================================================
+# EXCEPTION HANDLERS
+# ============================================================
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """Catch all unhandled exceptions and return proper JSON response."""
-    
-    # Log the full error with traceback
     logger.error(f"Unhandled exception on {request.method} {request.url.path}")
     logger.error(f"Exception type: {type(exc).__name__}")
     logger.error(f"Exception message: {str(exc)}")
     logger.exception("Full traceback:", exc_info=exc)
     
-    # Determine status code
-    status_code = 500
-    
-    # Build error response
-    error_detail = {
-        "error": "Internal server error",
-        "message": str(exc) if settings.debug else "An unexpected error occurred",
-        "type": type(exc).__name__ if settings.debug else None,
-        "path": str(request.url.path)
-    }
-    
-    # Return JSONResponse instead of dict
     return JSONResponse(
-        status_code=status_code,
-        content=error_detail
+        status_code=500,
+        content={
+            "error": "Internal server error",
+            "message": str(exc) if settings.debug else "An unexpected error occurred",
+            "type": type(exc).__name__ if settings.debug else None,
+            "path": str(request.url.path)
+        }
     )
 
 
-# Add specific exception handlers for common errors
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 @app.exception_handler(SQLAlchemyError)
 async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
-    """Handle SQLAlchemy database errors."""
     logger.error(f"Database error on {request.method} {request.url.path}: {str(exc)}")
-    logger.exception("Database error details:", exc_info=exc)
-    
     return JSONResponse(
         status_code=500,
         content={
@@ -262,59 +253,36 @@ async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
 
 @app.exception_handler(IntegrityError)
 async def integrity_exception_handler(request: Request, exc: IntegrityError):
-    """Handle database integrity errors (unique constraints, etc)."""
     logger.error(f"Integrity error on {request.method} {request.url.path}: {str(exc)}")
-    
-    # Parse common integrity errors
     error_msg = str(exc.orig) if hasattr(exc, 'orig') else str(exc)
     
     if "duplicate key" in error_msg.lower() or "unique constraint" in error_msg.lower():
         return JSONResponse(
             status_code=409,
-            content={
-                "error": "Conflict",
-                "message": "A record with this information already exists",
-                "type": "IntegrityError"
-            }
+            content={"error": "Conflict", "message": "A record with this information already exists", "type": "IntegrityError"}
         )
     
     return JSONResponse(
         status_code=400,
-        content={
-            "error": "Invalid data",
-            "message": "The provided data violates database constraints",
-            "type": "IntegrityError"
-        }
+        content={"error": "Invalid data", "message": "The provided data violates database constraints", "type": "IntegrityError"}
     )
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """Handle request validation errors."""
     logger.error(f"Validation error on {request.method} {request.url.path}: {exc.errors()}")
-    
     return JSONResponse(
         status_code=422,
-        content={
-            "error": "Validation error",
-            "message": "Invalid request data",
-            "details": exc.errors() if settings.debug else None
-        }
+        content={"error": "Validation error", "message": "Invalid request data", "details": exc.errors() if settings.debug else None}
     )
 
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    """Handle HTTP exceptions."""
     logger.warning(f"HTTP {exc.status_code} on {request.method} {request.url.path}: {exc.detail}")
-    
     return JSONResponse(
         status_code=exc.status_code,
-        content={
-            "error": exc.detail,
-            "message": exc.detail,
-            "status_code": exc.status_code
-        }
+        content={"error": exc.detail, "message": exc.detail, "status_code": exc.status_code}
     )
 
 
