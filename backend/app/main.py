@@ -6,16 +6,17 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from loguru import logger
 import sys
+from fastapi.responses import FileResponse
+from pathlib import Path
 from app.api.endpoints import organization
 from app.core.config import settings
 from app.db.session import init_db, close_db
 from app.api.endpoints import health, documents, auth, chat, search, admin, document_editor, customization
-from pathlib import Path
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+
 
 # Configure Loguru logger
 logger.remove()
@@ -184,34 +185,29 @@ app.include_router(
 )
 
 
-STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
-if STATIC_DIR.exists():
-    app.mount(
-        "/", 
-        StaticFiles(directory=str(STATIC_DIR), html=True), 
-        name="frontend"
-    )
-    logger.info(f"✅ Frontend mounted from {STATIC_DIR}")
-else:
-    logger.warning(f"⚠️ Static directory not found: {STATIC_DIR}")
+# Mount the React frontend build
+frontend_path = Path(__file__).parent / "static"
+if frontend_path.exists():
+    app.mount("/static", StaticFiles(directory=str(frontend_path)), name="static")
+    logger.info(f"✅ Frontend static files mounted at /static -> {frontend_path}")
 
 
+@app.get("/{full_path:path}")
+async def serve_spa(full_path: str):
+    """
+    Serve React SPA for all non-API paths to enable client-side routing.
+    Excludes API routes that start with your API prefix.
+    """
+    if full_path.startswith(settings.api_v1_prefix.strip("/")):
+        return JSONResponse({"error": "Not Found"}, status_code=404)
 
+    index_file = frontend_path / "index.html"
+    if index_file.exists():
+        return FileResponse(index_file)
+    else:
+        return JSONResponse({"error": "Frontend not built"}, status_code=500)
 
-
-# Add OPTIONS handler for preflight requests
-@app.options("/{path:path}")
-async def options_handler(path: str):
-    """Handle preflight OPTIONS requests."""
-    return JSONResponse(
-        content={"message": "OK"},
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
-            "Access-Control-Allow-Headers": "*",
-        }
-    )
 
 
 # Global exception handler - FIXED
