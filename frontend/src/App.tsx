@@ -21,8 +21,6 @@ import ProfilePage from './pages/ProfilePage';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import UserManagement from './pages/admin/UserManagement';
 import CustomizationPage from './pages/admin/CustomizationPage';
-import SuperAdminDashboard from './components/super-admin/SuperAdminDashboard';
-import OrganizationManagement from './components/super-admin/OrganizationManagement';
 
 function AppContent() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -95,24 +93,6 @@ function AppContent() {
                     element={
                       <ProtectedRoute adminOnly>
                         <CustomizationPage />
-                      </ProtectedRoute>
-                    }
-                  />
-
-                  {/* Super Admin Routes */}
-                  <Route
-                    path="/super-admin"
-                    element={
-                      <ProtectedRoute superAdminOnly>
-                        <SuperAdminDashboard />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/super-admin/organizations"
-                    element={
-                      <ProtectedRoute superAdminOnly>
-                        <OrganizationManagement />
                       </ProtectedRoute>
                     }
                   />
