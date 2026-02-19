@@ -1,36 +1,46 @@
+# ----------------------------
 # Stage 1: Build React frontend
+# ----------------------------
 FROM node:20-alpine AS frontend-builder
-WORKDIR /frontend
 
-# Copy package.json and install dependencies
-COPY frontend/package*.json ./
-RUN npm install
+WORKDIR /app/frontend
 
-# Copy all frontend files
-COPY frontend/ ./
+# Copy only frontend package files first for caching
+COPY frontend/package.json frontend/package-lock.json* ./
+
+# Install dependencies
+RUN npm ci
+
+# Copy the rest of the frontend source code
+COPY frontend/ .
 
 # Build React app
 RUN npm run build
 
+# ----------------------------
 # Stage 2: Build FastAPI backend
+# ----------------------------
 FROM python:3.11-slim
-WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y gcc libpq-dev && rm -rf /var/lib/apt/lists/*
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PORT=8000
 
-# Copy backend dependencies and install
+WORKDIR /app/backend
+
+# Copy backend requirements and install
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy backend code
-COPY backend/ backend/
+# Copy backend source code
+COPY backend/ .
 
-# Copy built frontend from stage 1
-COPY --from=frontend-builder /frontend/build backend/static
+# Copy React build from previous stage
+COPY --from=frontend-builder /app/frontend/build ./static
 
-# Expose port
+# Expose port for Render
 EXPOSE 8000
 
-# Run FastAPI
-CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Start FastAPI using Uvicorn
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
