@@ -187,7 +187,9 @@ app.include_router(
 
 
 # Mount the React frontend build
-frontend_path = Path(__file__).parent / "static"
+# Correct path for Docker deployment
+frontend_path = Path(__file__).resolve().parents[1] / "static"  # /app/backend/static
+
 if frontend_path.exists():
     app.mount("/static", StaticFiles(directory=str(frontend_path)), name="static")
     logger.info(f"✅ Frontend static files mounted at /static -> {frontend_path}")
@@ -195,10 +197,7 @@ if frontend_path.exists():
 
 @app.get("/{full_path:path}")
 async def serve_spa(full_path: str):
-    """
-    Serve React SPA for all non-API paths to enable client-side routing.
-    Excludes API routes that start with your API prefix.
-    """
+    """Serve React SPA for all non-API paths."""
     if full_path.startswith(settings.api_v1_prefix.strip("/")):
         return JSONResponse({"error": "Not Found"}, status_code=404)
 
@@ -207,6 +206,7 @@ async def serve_spa(full_path: str):
         return FileResponse(index_file)
     else:
         return JSONResponse({"error": "Frontend not built"}, status_code=500)
+
 
 
 
