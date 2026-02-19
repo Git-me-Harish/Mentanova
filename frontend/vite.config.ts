@@ -11,9 +11,9 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: 'dist',
+    outDir: '../backend/static',  // adjust this path to match your folder structure
+    emptyOutDir: true,            // clears old files before each build
     assetsDir: 'assets',
-    // Ensure relative paths are used for assets
     assetsInlineLimit: 0,
   },
   server: {
