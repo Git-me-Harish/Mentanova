@@ -132,23 +132,23 @@ for router, tag in routers:
 # -------------------- SPA ROUTING --------------------
 @app.get("/{full_path:path}")
 async def serve_spa(full_path: str):
-    """
-    Serve React SPA for all non-API routes
-    """
+    # Don't override API
     if full_path.startswith(settings.api_v1_prefix.strip("/")):
         return JSONResponse({"error": "Not Found"}, status_code=404)
 
-    index_file = frontend_path / "index.html"
+    index_file = Path(__file__).resolve().parents[1] / "static" / "index.html"
     if index_file.exists():
         return FileResponse(index_file)
     return JSONResponse({"error": "Frontend not built"}, status_code=500)
 
+
 @app.get("/")
 async def root():
-    index_file = frontend_path / "index.html"
+    index_file = Path(__file__).resolve().parents[1] / "static" / "index.html"
     if index_file.exists():
         return FileResponse(index_file)
     return JSONResponse({"error": "Frontend not built"}, status_code=500)
+
 
 # -------------------- EXCEPTION HANDLERS --------------------
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
