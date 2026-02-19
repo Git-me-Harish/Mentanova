@@ -2,22 +2,21 @@
 FROM node:20-alpine AS frontend-builder
 WORKDIR /frontend
 
-# Copy only package files first for caching
+# Copy package files and install dependencies
 COPY frontend/package.json frontend/package-lock.json* ./
-
 RUN npm install
 
-# Copy all frontend files
-COPY frontend/ .
+# Copy the rest of the frontend code
+COPY frontend/ ./
 
-# Build React app (outputs /frontend/build)
+# Build the React app
 RUN npm run build
 
 # Stage 2: Build Python backend
 FROM python:3.11-slim
 WORKDIR /app
 
-# System dependencies
+# Install system dependencies
 RUN apt-get update && apt-get install -y gcc libpq-dev && rm -rf /var/lib/apt/lists/*
 
 # Copy Python dependencies and install
@@ -27,7 +26,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy backend code
 COPY backend/ backend/
 
-# Copy frontend build into backend static folder
+# Copy the built frontend from Stage 1 into backend/static
 COPY --from=frontend-builder /frontend/build backend/static
 
 # Expose port
