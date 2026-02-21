@@ -101,15 +101,11 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-frontend_path = Path(__file__).parent.parent / "static"
+BASE_DIR = Path(__file__).resolve().parents[2]
+frontend_path = BASE_DIR / "frontend" / "dist"
 
 if frontend_path.exists():
-    app.mount(
-        "/",
-        StaticFiles(directory=str(frontend_path), html=True),
-        name="frontend",
-    )
-
+    app.mount("/", StaticFiles(directory=str(frontend_path), html=True), name="frontend")
 
 # Configure CORS - USING PROPERTY FOR DOCKER COMPATIBILITY
 logger.info(f"🔐 Configuring CORS with origins: {settings.cors_origins_list}")
