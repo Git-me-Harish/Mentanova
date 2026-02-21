@@ -104,6 +104,9 @@ app = FastAPI(
 BASE_DIR = Path(__file__).resolve().parents[2]
 frontend_path = BASE_DIR / "frontend" / "dist"
 
+print("Frontend path:", frontend_path)
+print("Exists:", frontend_path.exists())
+
 if frontend_path.exists():
     app.mount("/", StaticFiles(directory=str(frontend_path), html=True), name="frontend")
 
