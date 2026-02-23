@@ -192,6 +192,14 @@ app.include_router(
     tags=["Document Editor"]
 )
 
+print("\n==== REGISTERED ROUTES ====")
+for route in app.routes:
+    try:
+        print(route.path, route.methods)
+    except:
+        pass
+print("==== END ROUTES ====\n")
+
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
