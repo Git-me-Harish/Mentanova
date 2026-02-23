@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 import sys
 from fastapi.responses import FileResponse
+from fastapi import HTTPException
 from pathlib import Path
 from app.api.endpoints import organization
 from app.core.config import settings
@@ -201,6 +202,19 @@ print("==== END ROUTES ====\n")
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
     return FileResponse(frontend_path / "favicon.ico")
+
+# SPA fallback - MUST be defined AFTER routers
+@app.get("/{full_path:path}", include_in_schema=False)
+async def serve_frontend(full_path: str):
+    # Let API routes pass through
+    if full_path.startswith("api"):
+        raise HTTPException(status_code=404)
+
+    index_file = frontend_path / "index.html"
+    if index_file.exists():
+        return FileResponse(index_file)
+
+    raise HTTPException(status_code=404)
 
 
 # Global exception handler - FIXED
