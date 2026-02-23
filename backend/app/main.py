@@ -107,8 +107,14 @@ frontend_path = BASE_DIR / "frontend" / "dist"
 print("Frontend path:", frontend_path)
 print("Exists:", frontend_path.exists())
 
-if frontend_path.exists():
-    app.mount("/", StaticFiles(directory=str(frontend_path), html=True), name="frontend")
+from fastapi.responses import FileResponse
+
+# Serve frontend only for non-API routes
+@app.get("/{full_path:path}")
+async def serve_frontend(full_path: str):
+    if full_path.startswith("api"):
+        raise HTTPException(status_code=404)
+    return FileResponse(frontend_path / "index.html")
 
 # Configure CORS - USING PROPERTY FOR DOCKER COMPATIBILITY
 logger.info(f"🔐 Configuring CORS with origins: {settings.cors_origins_list}")
