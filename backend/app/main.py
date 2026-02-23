@@ -16,7 +16,7 @@ from pathlib import Path
 from app.core.config import settings
 from app.db.session import init_db, close_db
 from app.api.endpoints import (
-    health, documents, auth, chat, search, 
+    health, documents, auth, chat, search,
     admin, document_editor, customization, organization
 )
 
@@ -52,15 +52,15 @@ async def lifespan(app: FastAPI):
     logger.info(f"Environment: {settings.environment}")
     logger.info(f"Debug mode: {settings.debug}")
     logger.info(f"CORS Origins: {settings.cors_origins_list}")
-    
+
     try:
         await init_db()
         logger.info("✅ Database initialized")
-        
+
         Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
         Path(settings.upload_dir + "/branding").mkdir(parents=True, exist_ok=True)
         logger.info("✅ Upload directories created")
-        
+
         logger.info("📦 Pre-loading embedding model...")
         try:
             from app.services.embedding.embedding_service import embedding_service
@@ -69,15 +69,15 @@ async def lifespan(app: FastAPI):
             logger.info("✅ Embedding model pre-loaded")
         except Exception as e:
             logger.warning(f"⚠️ Model pre-load failed: {e}")
-        
+
         logger.info("🎉 Application startup complete!")
-        
+
     except Exception as e:
         logger.error(f"❌ Startup failed: {str(e)}")
         raise
-    
+
     yield
-    
+
     # Shutdown
     logger.info("🛑 Shutting down Novera AI Knowledge Assistant...")
     try:
@@ -101,20 +101,36 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+
 # ============================================
-# RESOLVE FRONTEND PATH
+# RESOLVE FRONTEND PATH (works in Docker + Local)
 # ============================================
-BASE_DIR = Path(__file__).resolve().parents[2]
-frontend_path = BASE_DIR / "frontend" / "dist"
+_possible_frontend_paths = [
+    Path(__file__).resolve().parent.parent / "frontend" / "dist",   # /app/frontend/dist (Docker)
+    Path(__file__).resolve().parents[2] / "frontend" / "dist",      # Local dev (MENTANOVA/frontend/dist)
+    Path("/app/frontend/dist"),                                      # Absolute Docker path
+]
+
+frontend_path = None
+for _path in _possible_frontend_paths:
+    if _path.exists() and (_path / "index.html").exists():
+        frontend_path = _path
+        break
+
+if frontend_path is None:
+    frontend_path = _possible_frontend_paths[0]  # Default fallback
+    logger.warning(f"⚠️ Frontend build not found. Tried: {[str(p) for p in _possible_frontend_paths]}")
+else:
+    logger.info(f"✅ Frontend build found at: {frontend_path}")
+
 logger.info(f"Frontend path: {frontend_path} (exists: {frontend_path.exists()})")
 
 
 # ============================================
-# MIDDLEWARE (ORDER MATTERS)
+# MIDDLEWARE (ORDER MATTERS — CORS FIRST)
 # ============================================
-
-# 1. CORS - Must be first
 logger.info(f"🔐 Configuring CORS with origins: {settings.cors_origins_list}")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
@@ -125,12 +141,13 @@ app.add_middleware(
     max_age=3600,
 )
 
-# 2. GZip compression
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+logger.info("✅ Middleware configured")
 
 
 # ============================================
-# API ROUTERS — REGISTERED FIRST (BEFORE ANY CATCH-ALL)
+# API ROUTERS — REGISTERED FIRST (BEFORE CATCH-ALL)
 # ============================================
 app.include_router(
     health.router,
@@ -190,15 +207,12 @@ app.include_router(
 # ============================================
 # STATIC FILE MOUNTS (AFTER API ROUTERS)
 # ============================================
-
-# Mount uploads directory
 upload_path = Path(settings.upload_dir)
-if upload_path.exists():
-    app.mount("/uploads", StaticFiles(directory=str(upload_path)), name="uploads")
-    logger.info(f"✅ Static files mounted at /uploads -> {upload_path}")
+upload_path.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(upload_path)), name="uploads")
+logger.info(f"✅ Static files mounted at /uploads -> {upload_path}")
 
-# Mount frontend assets (JS, CSS, images from Vite build)
-if frontend_path.exists() and (frontend_path / "assets").exists():
+if frontend_path and frontend_path.exists() and (frontend_path / "assets").exists():
     app.mount("/assets", StaticFiles(directory=str(frontend_path / "assets")), name="frontend_assets")
     logger.info(f"✅ Frontend assets mounted from {frontend_path / 'assets'}")
 
@@ -209,12 +223,13 @@ if frontend_path.exists() and (frontend_path / "assets").exists():
 print("\n==== REGISTERED ROUTES ====")
 for route in app.routes:
     try:
-        print(f"  {route.methods:30s} {route.path}")
-    except AttributeError:
-        try:
-            print(f"  {'MOUNT':30s} {route.path}")
-        except:
-            pass
+        if hasattr(route, 'methods') and route.methods:
+            methods = ", ".join(sorted(route.methods))
+        else:
+            methods = "MOUNT"
+        print(f"  {methods:30s} {route.path}")
+    except Exception:
+        pass
 print("==== END ROUTES ====\n")
 
 
@@ -224,72 +239,85 @@ print("==== END ROUTES ====\n")
 @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
 async def root_handler(request: Request):
     """
-    Root endpoint: serves frontend index.html for browsers,
-    returns JSON for health checks (HEAD requests from Render).
+    Root endpoint:
+    - HEAD: Returns 200 for Render health checks
+    - GET: Serves frontend index.html if available, otherwise JSON health response
     """
     if request.method == "HEAD":
         return JSONResponse({"status": "ok"})
-    
-    index_file = frontend_path / "index.html"
-    if index_file.exists():
-        return FileResponse(index_file)
-    
+
+    # Try serving frontend
+    if frontend_path and frontend_path.exists():
+        index_file = frontend_path / "index.html"
+        if index_file.exists():
+            return FileResponse(index_file)
+
+    # No frontend? Return API health response
     return JSONResponse({
         "status": "healthy",
         "service": settings.app_name,
-        "version": settings.app_version
+        "version": settings.app_version,
+        "frontend_available": frontend_path.exists() if frontend_path else False,
+        "docs": "/api/docs" if settings.debug else None
     })
 
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
-    """Serve favicon."""
-    favicon_file = frontend_path / "favicon.ico"
-    if favicon_file.exists():
-        return FileResponse(favicon_file)
+    """Serve favicon from frontend build."""
+    if frontend_path and frontend_path.exists():
+        favicon_file = frontend_path / "favicon.ico"
+        if favicon_file.exists():
+            return FileResponse(favicon_file)
     raise HTTPException(status_code=404)
 
 
 # ============================================
-# SPA FALLBACK — ABSOLUTE LAST ROUTE
+# SPA FALLBACK — MUST BE THE ABSOLUTE LAST ROUTE
 # ============================================
 @app.api_route("/{full_path:path}", methods=["GET"], include_in_schema=False)
-async def serve_frontend(request: Request, full_path: str):
+async def serve_spa_fallback(request: Request, full_path: str):
     """
-    SPA fallback: serves index.html for all non-API, non-static frontend routes.
+    SPA fallback: serves index.html for all frontend routes.
     
-    CRITICAL: This MUST be the last route registered.
-    It only handles GET requests so it won't interfere with POST/PUT/DELETE API calls.
+    CRITICAL RULES:
+    1. This MUST be the last route registered
+    2. Only handles GET (so POST/PUT/DELETE to API routes work correctly)
+    3. Never intercepts /api/* or /uploads/* paths
     """
     # ---- NEVER intercept API routes ----
     if full_path.startswith("api"):
-        logger.debug(f"SPA fallback: rejecting API path /{full_path}")
         raise HTTPException(
-            status_code=404, 
+            status_code=404,
             detail=f"API endpoint not found: /{full_path}"
         )
-    
+
     # ---- NEVER intercept upload routes ----
     if full_path.startswith("uploads"):
         raise HTTPException(status_code=404, detail="File not found")
-    
-    # ---- Try serving actual static file first ----
-    if frontend_path.exists():
+
+    # ---- NEVER intercept asset routes (handled by StaticFiles mount) ----
+    if full_path.startswith("assets"):
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    # ---- Try serving actual static file from frontend build ----
+    if frontend_path and frontend_path.exists():
         static_file = frontend_path / full_path
-        # Security: prevent path traversal
         try:
+            # Security: prevent path traversal attacks
             static_file.resolve().relative_to(frontend_path.resolve())
             if static_file.exists() and static_file.is_file():
                 return FileResponse(static_file)
         except ValueError:
             pass  # Path traversal attempt, ignore
-    
-    # ---- Fall back to index.html for SPA routing ----
-    index_file = frontend_path / "index.html"
-    if index_file.exists():
-        return FileResponse(index_file)
-    
-    # ---- No frontend build found ----
+
+    # ---- SPA: serve index.html for client-side routing ----
+    if frontend_path and frontend_path.exists():
+        index_file = frontend_path / "index.html"
+        if index_file.exists():
+            return FileResponse(index_file)
+
+    # ---- No frontend build available ----
     raise HTTPException(status_code=404, detail="Not Found")
 
 
@@ -334,7 +362,7 @@ async def integrity_exception_handler(request: Request, exc: IntegrityError):
     """Handle database integrity errors."""
     logger.error(f"Integrity error on {request.method} {request.url.path}: {str(exc)}")
     error_msg = str(exc.orig) if hasattr(exc, 'orig') else str(exc)
-    
+
     if "duplicate key" in error_msg.lower() or "unique constraint" in error_msg.lower():
         return JSONResponse(
             status_code=409,
@@ -344,7 +372,7 @@ async def integrity_exception_handler(request: Request, exc: IntegrityError):
                 "type": "IntegrityError"
             }
         )
-    
+
     return JSONResponse(
         status_code=400,
         content={
@@ -377,7 +405,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     logger.error(f"Exception type: {type(exc).__name__}")
     logger.error(f"Exception message: {str(exc)}")
     logger.exception("Full traceback:", exc_info=exc)
-    
+
     return JSONResponse(
         status_code=500,
         content={
@@ -390,7 +418,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 # ============================================
-# DIRECT RUN
+# DIRECT RUN (for local development)
 # ============================================
 if __name__ == "__main__":
     import uvicorn
