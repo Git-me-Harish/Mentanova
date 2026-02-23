@@ -7,19 +7,23 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi import HTTPException
 from loguru import logger
 import sys
-from fastapi.responses import FileResponse
-from fastapi import HTTPException
 from pathlib import Path
-from app.api.endpoints import organization
+
 from app.core.config import settings
 from app.db.session import init_db, close_db
-from app.api.endpoints import health, documents, auth, chat, search, admin, document_editor, customization
+from app.api.endpoints import (
+    health, documents, auth, chat, search, 
+    admin, document_editor, customization, organization
+)
 
 
-# Configure Loguru logger
+# ============================================
+# LOGGING CONFIGURATION
+# ============================================
 logger.remove()
 logger.add(
     sys.stdout,
@@ -37,12 +41,12 @@ logger.add(
 )
 
 
+# ============================================
+# APPLICATION LIFESPAN
+# ============================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Application lifespan manager.
-    Handles startup and shutdown events.
-    """
+    """Application lifespan manager."""
     # Startup
     logger.info("🚀 Starting Novera AI Knowledge Assistant...")
     logger.info(f"Environment: {settings.environment}")
@@ -50,11 +54,9 @@ async def lifespan(app: FastAPI):
     logger.info(f"CORS Origins: {settings.cors_origins_list}")
     
     try:
-        # Initialize database
         await init_db()
         logger.info("✅ Database initialized")
         
-        # Create upload directories
         Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
         Path(settings.upload_dir + "/branding").mkdir(parents=True, exist_ok=True)
         logger.info("✅ Upload directories created")
@@ -62,11 +64,8 @@ async def lifespan(app: FastAPI):
         logger.info("📦 Pre-loading embedding model...")
         try:
             from app.services.embedding.embedding_service import embedding_service
-            
-            # Force local model initialization
             embedding_service.use_local_fallback = True
             embedding_service._init_local_model()
-            
             logger.info("✅ Embedding model pre-loaded")
         except Exception as e:
             logger.warning(f"⚠️ Model pre-load failed: {e}")
@@ -77,64 +76,62 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌ Startup failed: {str(e)}")
         raise
     
-    yield  # Application runs here
+    yield
     
     # Shutdown
     logger.info("🛑 Shutting down Novera AI Knowledge Assistant...")
-    
     try:
         await close_db()
         logger.info("✅ Database connections closed")
         logger.info("👋 Shutdown complete")
-        
     except Exception as e:
         logger.error(f"❌ Shutdown error: {str(e)}")
 
 
-# Create FastAPI application
+# ============================================
+# CREATE APPLICATION
+# ============================================
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    description="AI-powered knowledge assistant with RAG capabilities for finance and HRMS documentation",
+    description="AI-powered knowledge assistant with RAG capabilities",
     docs_url="/api/docs" if settings.debug else None,
     redoc_url="/api/redoc" if settings.debug else None,
     openapi_url="/api/openapi.json" if settings.debug else None,
     lifespan=lifespan
 )
 
+# ============================================
+# RESOLVE FRONTEND PATH
+# ============================================
 BASE_DIR = Path(__file__).resolve().parents[2]
 frontend_path = BASE_DIR / "frontend" / "dist"
+logger.info(f"Frontend path: {frontend_path} (exists: {frontend_path.exists()})")
 
-print("Frontend path:", frontend_path)
-print("Exists:", frontend_path.exists())
 
-# Configure CORS - USING PROPERTY FOR DOCKER COMPATIBILITY
+# ============================================
+# MIDDLEWARE (ORDER MATTERS)
+# ============================================
+
+# 1. CORS - Must be first
 logger.info(f"🔐 Configuring CORS with origins: {settings.cors_origins_list}")
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
     allow_credentials=settings.cors_allow_credentials,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
     allow_headers=["*"],
     expose_headers=["*"],
     max_age=3600,
 )
 
-logger.info("✅ CORS middleware configured successfully")
-
-
-# Add GZip compression
+# 2. GZip compression
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-# Mount static files for uploads
-upload_path = Path(settings.upload_dir)
-if upload_path.exists():
-    app.mount("/uploads", StaticFiles(directory=str(upload_path)), name="uploads")
-    logger.info(f"✅ Static files mounted at /uploads -> {upload_path}")
 
-
-# Include routers
+# ============================================
+# API ROUTERS — REGISTERED FIRST (BEFORE ANY CATCH-ALL)
+# ============================================
 app.include_router(
     health.router,
     prefix=settings.api_v1_prefix,
@@ -177,7 +174,6 @@ app.include_router(
     tags=["Super Admin - Organizations"]
 )
 
-# Admin routes - requires admin role
 app.include_router(
     admin.router,
     prefix=settings.api_v1_prefix,
@@ -190,89 +186,153 @@ app.include_router(
     tags=["Document Editor"]
 )
 
+
+# ============================================
+# STATIC FILE MOUNTS (AFTER API ROUTERS)
+# ============================================
+
+# Mount uploads directory
+upload_path = Path(settings.upload_dir)
+if upload_path.exists():
+    app.mount("/uploads", StaticFiles(directory=str(upload_path)), name="uploads")
+    logger.info(f"✅ Static files mounted at /uploads -> {upload_path}")
+
+# Mount frontend assets (JS, CSS, images from Vite build)
+if frontend_path.exists() and (frontend_path / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=str(frontend_path / "assets")), name="frontend_assets")
+    logger.info(f"✅ Frontend assets mounted from {frontend_path / 'assets'}")
+
+
+# ============================================
+# DEBUG: PRINT ALL REGISTERED ROUTES
+# ============================================
 print("\n==== REGISTERED ROUTES ====")
 for route in app.routes:
     try:
-        print(route.path, route.methods)
-    except:
-        pass
+        print(f"  {route.methods:30s} {route.path}")
+    except AttributeError:
+        try:
+            print(f"  {'MOUNT':30s} {route.path}")
+        except:
+            pass
 print("==== END ROUTES ====\n")
+
+
+# ============================================
+# HEALTH CHECK & ROOT (for Render)
+# ============================================
+@app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
+async def root_handler(request: Request):
+    """
+    Root endpoint: serves frontend index.html for browsers,
+    returns JSON for health checks (HEAD requests from Render).
+    """
+    if request.method == "HEAD":
+        return JSONResponse({"status": "ok"})
+    
+    index_file = frontend_path / "index.html"
+    if index_file.exists():
+        return FileResponse(index_file)
+    
+    return JSONResponse({
+        "status": "healthy",
+        "service": settings.app_name,
+        "version": settings.app_version
+    })
 
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
-    return FileResponse(frontend_path / "favicon.ico")
-
-# SPA fallback - MUST be defined AFTER routers
-@app.get("/{full_path:path}", include_in_schema=False)
-async def serve_frontend(full_path: str):
-    # Let API routes pass through
-    if full_path.startswith("api"):
-        raise HTTPException(status_code=404)
-
-    index_file = frontend_path / "index.html"
-    if index_file.exists():
-        return FileResponse(index_file)
-
+    """Serve favicon."""
+    favicon_file = frontend_path / "favicon.ico"
+    if favicon_file.exists():
+        return FileResponse(favicon_file)
     raise HTTPException(status_code=404)
 
 
-# Global exception handler - FIXED
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """Catch all unhandled exceptions and return proper JSON response."""
+# ============================================
+# SPA FALLBACK — ABSOLUTE LAST ROUTE
+# ============================================
+@app.api_route("/{full_path:path}", methods=["GET"], include_in_schema=False)
+async def serve_frontend(request: Request, full_path: str):
+    """
+    SPA fallback: serves index.html for all non-API, non-static frontend routes.
     
-    # Log the full error with traceback
-    logger.error(f"Unhandled exception on {request.method} {request.url.path}")
-    logger.error(f"Exception type: {type(exc).__name__}")
-    logger.error(f"Exception message: {str(exc)}")
-    logger.exception("Full traceback:", exc_info=exc)
+    CRITICAL: This MUST be the last route registered.
+    It only handles GET requests so it won't interfere with POST/PUT/DELETE API calls.
+    """
+    # ---- NEVER intercept API routes ----
+    if full_path.startswith("api"):
+        logger.debug(f"SPA fallback: rejecting API path /{full_path}")
+        raise HTTPException(
+            status_code=404, 
+            detail=f"API endpoint not found: /{full_path}"
+        )
     
-    # Determine status code
-    status_code = 500
+    # ---- NEVER intercept upload routes ----
+    if full_path.startswith("uploads"):
+        raise HTTPException(status_code=404, detail="File not found")
     
-    # Build error response
-    error_detail = {
-        "error": "Internal server error",
-        "message": str(exc) if settings.debug else "An unexpected error occurred",
-        "type": type(exc).__name__ if settings.debug else None,
-        "path": str(request.url.path)
-    }
+    # ---- Try serving actual static file first ----
+    if frontend_path.exists():
+        static_file = frontend_path / full_path
+        # Security: prevent path traversal
+        try:
+            static_file.resolve().relative_to(frontend_path.resolve())
+            if static_file.exists() and static_file.is_file():
+                return FileResponse(static_file)
+        except ValueError:
+            pass  # Path traversal attempt, ignore
     
-    # Return JSONResponse instead of dict
-    return JSONResponse(
-        status_code=status_code,
-        content=error_detail
-    )
+    # ---- Fall back to index.html for SPA routing ----
+    index_file = frontend_path / "index.html"
+    if index_file.exists():
+        return FileResponse(index_file)
+    
+    # ---- No frontend build found ----
+    raise HTTPException(status_code=404, detail="Not Found")
 
 
-# Add specific exception handlers for common errors
+# ============================================
+# EXCEPTION HANDLERS
+# ============================================
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-@app.exception_handler(SQLAlchemyError)
-async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
-    """Handle SQLAlchemy database errors."""
-    logger.error(f"Database error on {request.method} {request.url.path}: {str(exc)}")
-    logger.exception("Database error details:", exc_info=exc)
-    
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Handle HTTP exceptions."""
+    logger.warning(f"HTTP {exc.status_code} on {request.method} {request.url.path}: {exc.detail}")
     return JSONResponse(
-        status_code=500,
+        status_code=exc.status_code,
         content={
-            "error": "Database error",
-            "message": "A database error occurred" if not settings.debug else str(exc),
-            "type": "DatabaseError"
+            "error": exc.detail,
+            "message": exc.detail,
+            "status_code": exc.status_code
+        }
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handle request validation errors."""
+    logger.error(f"Validation error on {request.method} {request.url.path}: {exc.errors()}")
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "Validation error",
+            "message": "Invalid request data",
+            "details": exc.errors() if settings.debug else None
         }
     )
 
 
 @app.exception_handler(IntegrityError)
 async def integrity_exception_handler(request: Request, exc: IntegrityError):
-    """Handle database integrity errors (unique constraints, etc)."""
+    """Handle database integrity errors."""
     logger.error(f"Integrity error on {request.method} {request.url.path}: {str(exc)}")
-    
-    # Parse common integrity errors
     error_msg = str(exc.orig) if hasattr(exc, 'orig') else str(exc)
     
     if "duplicate key" in error_msg.lower() or "unique constraint" in error_msg.lower():
@@ -295,41 +355,46 @@ async def integrity_exception_handler(request: Request, exc: IntegrityError):
     )
 
 
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """Handle request validation errors."""
-    logger.error(f"Validation error on {request.method} {request.url.path}: {exc.errors()}")
-    
+@app.exception_handler(SQLAlchemyError)
+async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
+    """Handle SQLAlchemy database errors."""
+    logger.error(f"Database error on {request.method} {request.url.path}: {str(exc)}")
+    logger.exception("Database error details:", exc_info=exc)
     return JSONResponse(
-        status_code=422,
+        status_code=500,
         content={
-            "error": "Validation error",
-            "message": "Invalid request data",
-            "details": exc.errors() if settings.debug else None
+            "error": "Database error",
+            "message": "A database error occurred" if not settings.debug else str(exc),
+            "type": "DatabaseError"
         }
     )
 
 
-@app.exception_handler(StarletteHTTPException)
-async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    """Handle HTTP exceptions."""
-    logger.warning(f"HTTP {exc.status_code} on {request.method} {request.url.path}: {exc.detail}")
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Catch all unhandled exceptions."""
+    logger.error(f"Unhandled exception on {request.method} {request.url.path}")
+    logger.error(f"Exception type: {type(exc).__name__}")
+    logger.error(f"Exception message: {str(exc)}")
+    logger.exception("Full traceback:", exc_info=exc)
     
     return JSONResponse(
-        status_code=exc.status_code,
+        status_code=500,
         content={
-            "error": exc.detail,
-            "message": exc.detail,
-            "status_code": exc.status_code
+            "error": "Internal server error",
+            "message": str(exc) if settings.debug else "An unexpected error occurred",
+            "type": type(exc).__name__ if settings.debug else None,
+            "path": str(request.url.path)
         }
     )
 
 
+# ============================================
+# DIRECT RUN
+# ============================================
 if __name__ == "__main__":
     import uvicorn
-    
     logger.info(f"🚀 Starting server on {settings.host}:{settings.port}")
-    
     uvicorn.run(
         "app.main:app",
         host=settings.host,
