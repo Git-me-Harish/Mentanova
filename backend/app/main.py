@@ -193,7 +193,9 @@ app.include_router(
 )
 
 
-
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return FileResponse(frontend_path / "favicon.ico")
 
 
 # Global exception handler - FIXED
